@@ -156,7 +156,6 @@ CPPFLAGS_TCC="
 -I $MES_PREFIX/lib
 -I $MES_PREFIX/include
 $CPP_TARGET_FLAG
--D inline=
 -D CONFIG_TCCDIR=\"$prefix/lib/tcc\"
 -D CONFIG_TCC_CRTPREFIX=\"$prefix/lib:"{B}"/lib:.\"
 -D CONFIG_TCC_ELFINTERP=\"$interpreter\"
