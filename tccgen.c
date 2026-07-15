@@ -3002,7 +3002,12 @@ ST_FUNC void vstore(void)
             else
 #endif
             /* Use memmove, rather than memcpy, as dest and src may be same: */
-#if BOOTSTRAP && __arm__
+/* BOOTSTRAP arm uses mes-libc __memmove (std arg order); under TCC_ARM_EABI
+   the correct target is TOK_memmove -> __aeabi_memmove, matching the EABI
+   runtime and the arg order below. The fork gated the DEF of TOK___memmove
+   under #ifndef TCC_ARM_EABI (tcctok.h) but not this use, so EABI builds
+   referenced an undefined token ("Target label TOK___memmove is not valid"). */
+#if BOOTSTRAP && __arm__ && !defined (TCC_ARM_EABI)
             vpush_global_sym(&func_old_type, TOK___memmove);
 #else
             vpush_global_sym(&func_old_type, TOK_memmove);
@@ -6120,7 +6125,9 @@ static void init_putz(Section *sec, unsigned long c, int size)
     if (sec) {
         /* nothing to do because globals are already set to zero */
     } else {
-#if BOOTSTRAP && __arm__
+/* Same fork guard bug as TOK___memmove above: under EABI, use TOK_memset ->
+   __aeabi_memset, whose (dest, n, c) arg order matches the ARM swap below. */
+#if BOOTSTRAP && __arm__ && !defined (TCC_ARM_EABI)
         vpush_global_sym(&func_old_type, TOK___memset);
 #else
         vpush_global_sym(&func_old_type, TOK_memset);
