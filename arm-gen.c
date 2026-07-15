@@ -1368,7 +1368,11 @@ void gfunc_prolog(CType *func_type)
 #ifdef TCC_ARM_EABI
   if (float_abi == ARM_HARD_FLOAT) {
     func_vc += nf * 4;
+#if !BOOTSTRAP
     avregs = AVAIL_REGS_INITIALIZER;
+#else
+    { struct avail_regs _tmp = AVAIL_REGS_INITIALIZER; avregs = _tmp; }
+#endif
   }
 #endif
   pn = struct_ret, sn = 0;
