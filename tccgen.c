@@ -4792,6 +4792,16 @@ ST_FUNC void unary(void)
             /* In IEEE negate(x) isn't subtract(0,x), but rather
 	       subtract(-0, x).  */
 	    vpush(&vtop->type);
+#if BOOTSTRAP && __arm__
+            /* Keep the compiler's own negative zero independent of the
+               bootstrap compiler's floating-literal constant folding. */
+            if (t == VT_FLOAT) {
+                vtop->c.tab[0] = 0x80000000;
+            } else {
+                vtop->c.tab[0] = 0;
+                vtop->c.tab[1] = 0x80000000;
+            }
+#else
 #if HAVE_FLOAT
 	    if (t == VT_FLOAT)
 	        vtop->c.f = -1.0 * 0.0;
@@ -4799,6 +4809,7 @@ ST_FUNC void unary(void)
 	        vtop->c.d = -1.0 * 0.0;
 	    else
 	        vtop->c.ld = -1.0 * 0.0;
+#endif
 #endif
 	} else
 	    vpushi(0);
