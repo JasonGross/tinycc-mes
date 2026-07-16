@@ -1638,19 +1638,30 @@ void gen_opi(int op)
       vswap();
       c=intr(gv(RC_INT));
       vswap();
+      /* opc==0x15 is CMP (the comparison ops fall through the `default` case
+	 above). CMP has no destination: bits 15-12 are SBZ. The generic path
+	 below allocates a scratch reg `r` and ORs it into that field; real ARM
+	 ignores those bits, but a strict decoder (qemu) faults on the resulting
+	 UNPREDICTABLE encoding. Only ORs r<<12 when there is a real result. */
+      { int is_cmp = (opc == 0x15);
       opc=0xE0000000|(opc<<20)|(c<<16);
       if((vtop->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST) {
 	uint32_t x;
 	x=stuff_const(opc|0x2000000,vtop->c.i);
 	if(x) {
 	  r=intr(vtop[-1].r=get_reg_ex(RC_INT,regmask(vtop[-1].r)));
-	  o(x|(r<<12));
+	  /* NB: if/else, not `o(x|(is_cmp?0:(r<<12)))`: MesCC miscompiles a
+	     `cond?0:expr` ternary used as a non-final term of a |-chain passed
+	     as a call argument (it drops the other terms), so the ternary form
+	     emits a 0x00000000 word for every add. gcc handles it fine. */
+	  if (is_cmp) o(x); else o(x|(r<<12));
 	  goto done;
 	}
       }
       fr=intr(gv(RC_INT));
       r=intr(vtop[-1].r=get_reg_ex(RC_INT,two2mask(vtop->r,vtop[-1].r)));
-      o(opc|(r<<12)|fr);
+      if (is_cmp) o(opc|fr); else o(opc|(r<<12)|fr);
+      }
 done:
       vtop--;
       if (op >= TOK_ULT && op <= TOK_GT) {
