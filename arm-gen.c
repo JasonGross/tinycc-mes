@@ -1269,16 +1269,19 @@ again:
      breaks every %/divmod (__aeabi_idivmod returns its {quot,rem} pair by
      value) when tcc compiles itself. The correct mask is exactly the core
      registers each CORE_STRUCT_CLASS plan covers, bits [pplan->start,
-     pplan->end); a plain int accumulator over the plan (no out-pointer)
-     stays clear of the miscompile, the same dependence-removal as the
-     stack_size rewrite above (assign_regs' returned nsaa is likewise wrong). */
+     pplan->end).
+
+     Compute that mask in closed form, not with an inner loop: MesCC also
+     drops trailing iterations from that loop, with the truncation depth
+     changing when unrelated same-file code changes. The bitmask below sets
+     exactly bits [start,end) without exposing another loop to MesCC. A plain
+     int accumulator over the plan also avoids the original out-parameter
+     miscompile. */
   todo = 0;
   {
     struct param_plan *tp;
-    int tr;
     for (tp = plan->clsplans[CORE_STRUCT_CLASS]; tp; tp = tp->prev)
-      for (tr = tp->start; tr < tp->end; tr++)
-        todo |= 1 << tr;
+      todo |= ((1 << tp->end) - 1) & ~((1 << tp->start) - 1);
   }
 
   if(todo) {
