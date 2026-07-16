@@ -84,14 +84,6 @@ enum {
 };
 
 #ifdef TCC_ARM_VFP
-/* T2CPR(t) = the VFP double-precision opcode bit. Kept as upstream's ternary,
-   but it MUST NOT be OR'd inline into an opcode word: MesCC miscompiles a
-   |-chain whose non-first term is an inline conditional (ternary, or a shift of
-   a relational), dropping the terms BEFORE it -- so `o(BASE|reg|T2CPR(t))` emits
-   the bare 0x100 and tcc-boot0 faults at the first int->double cast. The five
-   sites below compute `int cpr = T2CPR(...)` into a local first, then OR the
-   plain cpr. (Assigning the whole chain to a temp does NOT help; the fix is a
-   temp for the conditional ALONE. Same family as the gen_opi CMP if/else fix.) */
 #define T2CPR(t) (((t) & VT_BTYPE) != VT_FLOAT ? 0x100 : 0)
 #endif
 
@@ -648,7 +640,7 @@ void load(int r, SValue *sv)
         o(0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|T2CPR(ft)); /* fcpyX */
 #else
       {
-        int cpr = T2CPR(ft); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+        int cpr = T2CPR(ft);
         int t = 0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|cpr;
         o(t); /* fcpyX */
       }
@@ -948,12 +940,25 @@ struct plan {
     struct param_plan *clsplans[NB_CLASSES]; /* per class lists of param plans */
 };
 
+#if BOOTSTRAP
+#define add_param_plan(plan,pplan,class)                              \
+    do {                                                              \
+        pplan.prev = plan->clsplans[class];                           \
+        plan->pplans[plan ## _nb].start = pplan.start;                \
+        plan->pplans[plan ## _nb].end = pplan.end;                    \
+        plan->pplans[plan ## _nb].sval = pplan.sval;                  \
+        plan->pplans[plan ## _nb].prev = pplan.prev;                  \
+        plan->clsplans[class] = &plan->pplans[plan ## _nb];           \
+        plan ## _nb++;                                                \
+    } while(0)
+#else
 #define add_param_plan(plan,pplan,class)                        \
     do {                                                        \
         pplan.prev = plan->clsplans[class];                     \
         plan->pplans[plan ## _nb] = pplan;                      \
         plan->clsplans[class] = &plan->pplans[plan ## _nb++];   \
     } while(0)
+#endif
 
 /* Assign parameters to registers and stack with alignment according to the
    rules in the procedure call standard for the ARM architecture (AAPCS).
@@ -987,7 +992,13 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 
   for(i = nb_args; i-- ;) {
     int j, start_vfpreg = 0;
+#if !BOOTSTRAP
     CType type = vtop[-i].type;
+#else
+    CType type;
+    type.t = vtop[-i].type.t;
+    type.ref = vtop[-i].type.ref;
+#endif
     type.t &= ~VT_ARRAY;
     size = type_size(&type, &align);
     size = (size + 3) & ~3;
@@ -1010,8 +1021,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
             pplan = (struct param_plan) {start_vfpreg, end_vfpreg, &vtop[-i]};
 #else
-            struct param_plan tmp = {start_vfpreg, end_vfpreg, &vtop[-i]};
-            pplan = tmp;
+            pplan.start = start_vfpreg;
+            pplan.end = end_vfpreg;
+            pplan.sval = &vtop[-i];
 #endif
             if (is_hfa)
               add_param_plan(plan, pplan, VFP_STRUCT_CLASS);
@@ -1032,10 +1044,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
         pplan = (struct param_plan) {ncrn, j, &vtop[-i]};
 #else
-        {
-          struct param_plan tmp =  {ncrn, j, &vtop[-i]};
-          pplan = tmp;
-        }
+        pplan.start = ncrn;
+        pplan.end = j;
+        pplan.sval = &vtop[-i];
 #endif
         add_param_plan(plan, pplan, CORE_STRUCT_CLASS);
         ncrn += size/4;
@@ -1058,8 +1069,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
         pplan = (struct param_plan) {ncrn, ncrn, &vtop[-i]};
 #else
-        struct param_plan tmp = {ncrn, ncrn, &vtop[-i]};
-        pplan = tmp;
+        pplan.start = ncrn;
+        pplan.end = ncrn;
+        pplan.sval = &vtop[-i];
 #endif
         ncrn++;
         if (is_long)
@@ -1072,10 +1084,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
     pplan = (struct param_plan) {nsaa, nsaa + size, &vtop[-i]};
 #else
-    {
-      struct param_plan tmp = {nsaa, nsaa + size, &vtop[-i]};
-      pplan = tmp;
-    }
+    pplan.start = nsaa;
+    pplan.end = nsaa + size;
+    pplan.sval = &vtop[-i];
 #endif
     add_param_plan(plan, pplan, STACK_CLASS);
     nsaa += size; /* size already rounded up before */
@@ -1258,16 +1269,19 @@ again:
      breaks every %/divmod (__aeabi_idivmod returns its {quot,rem} pair by
      value) when tcc compiles itself. The correct mask is exactly the core
      registers each CORE_STRUCT_CLASS plan covers, bits [pplan->start,
-     pplan->end); a plain int accumulator over the plan (no out-pointer)
-     stays clear of the miscompile, the same dependence-removal as the
-     stack_size rewrite above (assign_regs' returned nsaa is likewise wrong). */
+     pplan->end).
+
+     Compute that mask in closed form, not with an inner loop: MesCC also
+     drops trailing iterations from that loop, with the truncation depth
+     changing when unrelated same-file code changes. The bitmask below sets
+     exactly bits [start,end) without exposing another loop to MesCC. A plain
+     int accumulator over the plan also avoids the original out-parameter
+     miscompile. */
   todo = 0;
   {
     struct param_plan *tp;
-    int tr;
     for (tp = plan->clsplans[CORE_STRUCT_CLASS]; tp; tp = tp->prev)
-      for (tr = tp->start; tr < tp->end; tr++)
-        todo |= 1 << tr;
+      todo |= ((1 << tp->end) - 1) & ~((1 << tp->start) - 1);
   }
 
   if(todo) {
@@ -1773,8 +1787,12 @@ void gen_opf(int op)
 {
   uint32_t x;
   int fneg=0,r;
-  { int cpr = T2CPR(vtop->type.t); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+#if !BOOTSTRAP
+  x=0xEE000A00|T2CPR(vtop->type.t);
+#else
+  { int cpr = T2CPR(vtop->type.t);
     x=0xEE000A00|cpr; }
+#endif
   switch(op) {
     case '+':
       if(is_zero(-1))
@@ -2086,7 +2104,7 @@ ST_FUNC void gen_cvt_itof1(int t)
 #if !BOOTSTRAP
     o(0xEEB80A40|r2|T2CPR(t)); /* fYitoX*/
 #else
-    int cpr = T2CPR(t); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+    int cpr = T2CPR(t);
     int x = 0xEEB80A40|r2|cpr;
     o(x); /* fYitoX*/
 #endif
@@ -2168,7 +2186,7 @@ void gen_cvt_ftoi(int t)
 #if !BOOTSTRAP
     o(0xEEBC0AC0|(r<<12)|r|T2CPR(r2)|u); /* ftoXizY */
 #else
-    int cpr = T2CPR(r2); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+    int cpr = T2CPR(r2);
     int x =0xEEBC0AC0|(r<<12)|r|cpr|u;
     o(x); /* ftoXizY */
 #endif
@@ -2228,7 +2246,7 @@ void gen_cvt_ftof(int t)
 #if !BOOTSTRAP
     o(0xEEB70AC0|(r<<12)|r|T2CPR(vtop->type.t));
 #else
-    int cpr = T2CPR(vtop->type.t); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+    int cpr = T2CPR(vtop->type.t);
     int x = 0xEEB70AC0|(r<<12)|r|cpr;
     o(x);
 #endif

@@ -1834,6 +1834,13 @@ static void gen_opic(int op)
                 vtop->c.i = 0;
             vswap();
             vtop--;
+#if BOOTSTRAP && PTR_SIZE == 4
+        } else if (c2 && op == TOK_PDIV && (uint32_t)l2 == 1) {
+            /* A tcc-mes-built HAVE_LONG_LONG compiler misses the uint64_t
+               l2 == 1 test below, then rewrites pointer / 1 as SAR #0.  ARM
+               encodes an immediate ASR of zero as ASR #32. */
+            vtop--;
+#endif
         } else if (c2 && (((op == '*' || op == '/' || op == TOK_UDIV ||
                           op == TOK_PDIV) &&
                            l2 == 1) ||
@@ -4785,6 +4792,16 @@ ST_FUNC void unary(void)
             /* In IEEE negate(x) isn't subtract(0,x), but rather
 	       subtract(-0, x).  */
 	    vpush(&vtop->type);
+#if BOOTSTRAP && __arm__
+            /* Keep the compiler's own negative zero independent of the
+               bootstrap compiler's floating-literal constant folding. */
+            if (t == VT_FLOAT) {
+                vtop->c.tab[0] = 0x80000000;
+            } else {
+                vtop->c.tab[0] = 0;
+                vtop->c.tab[1] = 0x80000000;
+            }
+#else
 #if HAVE_FLOAT
 	    if (t == VT_FLOAT)
 	        vtop->c.f = -1.0 * 0.0;
@@ -4792,6 +4809,7 @@ ST_FUNC void unary(void)
 	        vtop->c.d = -1.0 * 0.0;
 	    else
 	        vtop->c.ld = -1.0 * 0.0;
+#endif
 #endif
 	} else
 	    vpushi(0);
@@ -6384,8 +6402,8 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
 		*(float*)ptr = vtop->c.f;
 #else
                 {
-                  long *lptr = ptr;
-                  *lptr = vtop->c.f;
+		  int *iptr = ptr;
+		  *iptr = vtop->c.tab[0];
                 }
 #endif
 #endif
@@ -6396,8 +6414,9 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
 		*(double *)ptr = vtop->c.d;
 #else
                 {
-                  long long *llptr = ptr;
-                  *llptr = vtop->c.d;
+		  int *iptr = ptr;
+		  iptr[0] = vtop->c.tab[0];
+		  iptr[1] = vtop->c.tab[1];
                 }
 #endif
 #endif
