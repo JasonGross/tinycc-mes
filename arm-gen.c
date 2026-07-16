@@ -1241,6 +1241,26 @@ again:
    * manually, without the help of gv(int). */
   save_regs(nb_args);
 
+  /* Recompute the pop {todo} register mask from the plan we actually walk
+     rather than trusting assign_regs' *todo out-parameter: MesCC miscompiles
+     that store in context (it comes out 1 instead of 3/7), so a small struct
+     passed in core registers would pop only its first word -- ldmfd sp!,{r0}
+     in place of pop {r0,r1} -- leaving the remaining words garbage. This
+     breaks every %/divmod (__aeabi_idivmod returns its {quot,rem} pair by
+     value) when tcc compiles itself. The correct mask is exactly the core
+     registers each CORE_STRUCT_CLASS plan covers, bits [pplan->start,
+     pplan->end); a plain int accumulator over the plan (no out-pointer)
+     stays clear of the miscompile, the same dependence-removal as the
+     stack_size rewrite above (assign_regs' returned nsaa is likewise wrong). */
+  todo = 0;
+  {
+    struct param_plan *tp;
+    int tr;
+    for (tp = plan->clsplans[CORE_STRUCT_CLASS]; tp; tp = tp->prev)
+      for (tr = tp->start; tr < tp->end; tr++)
+        todo |= 1 << tr;
+  }
+
   if(todo) {
     o(0xE8BD0000|todo); /* pop {todo} */
     for(pplan = plan->clsplans[CORE_STRUCT_CLASS]; pplan; pplan = pplan->prev) {
