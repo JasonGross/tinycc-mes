@@ -580,6 +580,14 @@ static void asm_parse_directive(TCCState *s1, int global)
         size = 1;
         goto asm_data;
     case TOK_ASMDIR_word:
+#ifdef TCC_TARGET_ARM
+        /* On ARM (and per GNU as), ".word" is a 32-bit datum; only x86 treats
+           it as 16-bit. The fork inherited x86's size=2, which silently
+           truncated musl's `.word 0xe7f000f0` (a_crash) to 2 bytes and left
+           the section 2-byte-misaligned, corrupting later branch fixups. */
+        size = 4;
+        goto asm_data;
+#endif
     case TOK_ASMDIR_short:
         size = 2;
         goto asm_data;
