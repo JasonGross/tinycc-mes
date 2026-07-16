@@ -2652,12 +2652,15 @@ maybe_newline:
                 p++;
                 tok = TOK_TWOSHARPS;
             } else {
+#if !defined(TCC_TARGET_ARM)
                 if (parse_flags & PARSE_FLAG_ASM_FILE) {
                     p = parse_line_comment(p - 1);
                     goto redo_no_start;
-                } else {
+                } else
+#endif
+                    /* ARM assembly uses '#' for immediate constants, so it
+                       must be a real token there, not a line comment. */
                     tok = '#';
-                }
             }
         }
         break;
