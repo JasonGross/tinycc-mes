@@ -1834,6 +1834,13 @@ static void gen_opic(int op)
                 vtop->c.i = 0;
             vswap();
             vtop--;
+#if BOOTSTRAP && PTR_SIZE == 4
+        } else if (c2 && op == TOK_PDIV && (uint32_t)l2 == 1) {
+            /* A tcc-mes-built HAVE_LONG_LONG compiler misses the uint64_t
+               l2 == 1 test below, then rewrites pointer / 1 as SAR #0.  ARM
+               encodes an immediate ASR of zero as ASR #32. */
+            vtop--;
+#endif
         } else if (c2 && (((op == '*' || op == '/' || op == TOK_UDIV ||
                           op == TOK_PDIV) &&
                            l2 == 1) ||
