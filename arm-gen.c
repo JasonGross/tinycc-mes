@@ -939,12 +939,25 @@ struct plan {
     struct param_plan *clsplans[NB_CLASSES]; /* per class lists of param plans */
 };
 
+#if BOOTSTRAP
+#define add_param_plan(plan,pplan,class)                              \
+    do {                                                              \
+        pplan.prev = plan->clsplans[class];                           \
+        plan->pplans[plan ## _nb].start = pplan.start;                \
+        plan->pplans[plan ## _nb].end = pplan.end;                    \
+        plan->pplans[plan ## _nb].sval = pplan.sval;                  \
+        plan->pplans[plan ## _nb].prev = pplan.prev;                  \
+        plan->clsplans[class] = &plan->pplans[plan ## _nb];           \
+        plan ## _nb++;                                                \
+    } while(0)
+#else
 #define add_param_plan(plan,pplan,class)                        \
     do {                                                        \
         pplan.prev = plan->clsplans[class];                     \
         plan->pplans[plan ## _nb] = pplan;                      \
         plan->clsplans[class] = &plan->pplans[plan ## _nb++];   \
     } while(0)
+#endif
 
 /* Assign parameters to registers and stack with alignment according to the
    rules in the procedure call standard for the ARM architecture (AAPCS).
@@ -978,7 +991,13 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 
   for(i = nb_args; i-- ;) {
     int j, start_vfpreg = 0;
+#if !BOOTSTRAP
     CType type = vtop[-i].type;
+#else
+    CType type;
+    type.t = vtop[-i].type.t;
+    type.ref = vtop[-i].type.ref;
+#endif
     type.t &= ~VT_ARRAY;
     size = type_size(&type, &align);
     size = (size + 3) & ~3;
@@ -1001,8 +1020,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
             pplan = (struct param_plan) {start_vfpreg, end_vfpreg, &vtop[-i]};
 #else
-            struct param_plan tmp = {start_vfpreg, end_vfpreg, &vtop[-i]};
-            pplan = tmp;
+            pplan.start = start_vfpreg;
+            pplan.end = end_vfpreg;
+            pplan.sval = &vtop[-i];
 #endif
             if (is_hfa)
               add_param_plan(plan, pplan, VFP_STRUCT_CLASS);
@@ -1023,10 +1043,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
         pplan = (struct param_plan) {ncrn, j, &vtop[-i]};
 #else
-        {
-          struct param_plan tmp =  {ncrn, j, &vtop[-i]};
-          pplan = tmp;
-        }
+        pplan.start = ncrn;
+        pplan.end = j;
+        pplan.sval = &vtop[-i];
 #endif
         add_param_plan(plan, pplan, CORE_STRUCT_CLASS);
         ncrn += size/4;
@@ -1049,8 +1068,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
         pplan = (struct param_plan) {ncrn, ncrn, &vtop[-i]};
 #else
-        struct param_plan tmp = {ncrn, ncrn, &vtop[-i]};
-        pplan = tmp;
+        pplan.start = ncrn;
+        pplan.end = ncrn;
+        pplan.sval = &vtop[-i];
 #endif
         ncrn++;
         if (is_long)
@@ -1063,10 +1083,9 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
 #if !BOOTSTRAP
     pplan = (struct param_plan) {nsaa, nsaa + size, &vtop[-i]};
 #else
-    {
-      struct param_plan tmp = {nsaa, nsaa + size, &vtop[-i]};
-      pplan = tmp;
-    }
+    pplan.start = nsaa;
+    pplan.end = nsaa + size;
+    pplan.sval = &vtop[-i];
 #endif
     add_param_plan(plan, pplan, STACK_CLASS);
     nsaa += size; /* size already rounded up before */
