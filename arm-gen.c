@@ -1103,9 +1103,12 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
    todo: a bitmap indicating what core reg will hold a parameter
 
    Returns the number of SValue added by this function on the value stack */
-static int copy_params(int nb_args, struct plan *plan, int todo)
+static int copy_params(int nb_args, struct plan *plan, int todo, int *ret_stack_size)
 {
   int size, align, r, i, nb_extra_sval = 0;
+  int stack_size = 0; /* bytes actually pushed for stacked params; the caller
+                         cleans up exactly this instead of assign_regs' returned
+                         nsaa, which MesCC miscompiles for 2+ stacked args. */
   struct param_plan *pplan;
   int pass = 0;
 
@@ -1148,6 +1151,12 @@ again:
             size += padding; /* Add padding if any */
             /* allocate the necessary size on stack */
             gadd_sp(-size);
+            if (i == STACK_CLASS)
+              stack_size += size; /* pushed struct (incl. leading padding) */
+            else if (i == CORE_STRUCT_CLASS)
+              /* spanning struct: pop {todo} below removes the reg words; only
+                 the spill past r0-r3 stays for the callee. */
+              stack_size += size - 4 * (pplan->end - pplan->start);
             /* generate structure store */
             r = get_reg(RC_INT);
             o(0xE28D0000|(intr(r)<<12)|padding); /* add r, sp, padding */
@@ -1207,8 +1216,13 @@ again:
               r = gv(RC_INT);
               o(0xE52D0004|(intr(r)<<12)); /* push r */
             }
-            if (i == STACK_CLASS && pplan->prev)
-              gadd_sp(pplan->prev->end - pplan->start); /* Add padding if any */
+            if (i == STACK_CLASS) {
+              stack_size += size; /* pushed 4 (or 8 for llong) bytes */
+              if (pplan->prev) {
+                gadd_sp(pplan->prev->end - pplan->start); /* Add padding if any */
+                stack_size -= pplan->prev->end - pplan->start; /* count that pad */
+              }
+            }
           }
           break;
 
@@ -1264,6 +1278,7 @@ again:
       }
     }
   }
+  *ret_stack_size = stack_size;
   return nb_extra_sval;
 }
 
@@ -1273,6 +1288,7 @@ again:
 void gfunc_call(int nb_args)
 {
   int r, args_size;
+  int stack_size, align_pad;
   int def_float_abi = float_abi;
   int todo;
   struct plan plan;
@@ -1295,21 +1311,26 @@ void gfunc_call(int nb_args)
 
   args_size = assign_regs(nb_args, float_abi, &plan, &todo);
 
+  align_pad = 0;
 #ifdef TCC_ARM_EABI
   if (args_size & 7) { /* Stack must be 8 byte aligned at fct call for EABI */
-    args_size = (args_size + 7) & ~7;
     o(0xE24DD004); /* sub sp, sp, #4 */
+    align_pad = 4;
   }
 #endif
 
-  nb_args += copy_params(nb_args, &plan, todo);
+  stack_size = 0;
+  nb_args += copy_params(nb_args, &plan, todo, &stack_size);
   tcc_free(plan.pplans);
 
   /* Move fct SValue on top as required by gcall_or_jmp */
   vrotb(nb_args + 1);
   gcall_or_jmp(0);
-  if (args_size)
-      gadd_sp(args_size); /* pop all parameters passed on the stack */
+  stack_size += align_pad;
+  if (stack_size)
+      gadd_sp(stack_size); /* pop stacked params + EABI alignment pad; size from
+                              copy_params' actual pushes (MesCC miscompiles the
+                              nsaa assign_regs returns for 2+ stacked args). */
 #if defined(TCC_ARM_EABI) && defined(TCC_ARM_VFP)
   if(float_abi == ARM_SOFTFP_FLOAT && is_float(vtop->type.ref->type.t)) {
     if((vtop->type.ref->type.t & VT_BTYPE) == VT_FLOAT) {
