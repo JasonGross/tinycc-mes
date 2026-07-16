@@ -640,7 +640,8 @@ void load(int r, SValue *sv)
         o(0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|T2CPR(ft)); /* fcpyX */
 #else
       {
-        int t = 0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|T2CPR(ft);
+        int cpr = T2CPR(ft);
+        int t = 0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|cpr;
         o(t); /* fcpyX */
       }
 #endif
@@ -1783,7 +1784,12 @@ void gen_opf(int op)
 {
   uint32_t x;
   int fneg=0,r;
+#if !BOOTSTRAP
   x=0xEE000A00|T2CPR(vtop->type.t);
+#else
+  { int cpr = T2CPR(vtop->type.t);
+    x=0xEE000A00|cpr; }
+#endif
   switch(op) {
     case '+':
       if(is_zero(-1))
@@ -2095,7 +2101,8 @@ ST_FUNC void gen_cvt_itof1(int t)
 #if !BOOTSTRAP
     o(0xEEB80A40|r2|T2CPR(t)); /* fYitoX*/
 #else
-    int x = 0xEEB80A40|r2|T2CPR(t);
+    int cpr = T2CPR(t);
+    int x = 0xEEB80A40|r2|cpr;
     o(x); /* fYitoX*/
 #endif
 #else
@@ -2176,7 +2183,8 @@ void gen_cvt_ftoi(int t)
 #if !BOOTSTRAP
     o(0xEEBC0AC0|(r<<12)|r|T2CPR(r2)|u); /* ftoXizY */
 #else
-    int x =0xEEBC0AC0|(r<<12)|r|T2CPR(r2)|u;
+    int cpr = T2CPR(r2);
+    int x =0xEEBC0AC0|(r<<12)|r|cpr|u;
     o(x); /* ftoXizY */
 #endif
     r2=intr(vtop->r=get_reg(RC_INT));
@@ -2235,7 +2243,8 @@ void gen_cvt_ftof(int t)
 #if !BOOTSTRAP
     o(0xEEB70AC0|(r<<12)|r|T2CPR(vtop->type.t));
 #else
-    int x = 0xEEB70AC0|(r<<12)|r|T2CPR(vtop->type.t);
+    int cpr = T2CPR(vtop->type.t);
+    int x = 0xEEB70AC0|(r<<12)|r|cpr;
     o(x);
 #endif
   }
