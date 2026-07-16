@@ -1738,6 +1738,18 @@ done:
       if ((vtop->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST) {
 	fr=intr(vtop[-1].r=get_reg_ex(RC_INT,regmask(vtop[-1].r)));
 	c = vtop->c.i & 0x1f;
+	if (c == 0)
+	  /* An immediate shift of 0 is not a no-op on ARM: LSR #0 and ASR #0
+	     both encode as shift-by-32 (RRX for ROR), and only LSL #0 is the
+	     plain MOV Rd,Rm we want.  Clear the shift-type field so a zero
+	     count always emits MOV Rd,Rm -- the true "shift by zero" for every
+	     type.  A correct compiler folds x<<0 / x>>0 / (x/1 pointer diff)
+	     away in tccgen's NOP filter and never reaches here, so this is a
+	     byte-identical no-op for a gcc-built tcc; it only rescues a
+	     MesCC-built tcc whose miscompiled NOP filter lets such a case fall
+	     through to a SAR/SHR #0 (bug #14).  Kept a plain if-guard on
+	     purpose: MesCC-safe (no conditional inside an OR-chain). */
+	  opc &= ~(3 << 5);
 	o(opc|(c<<7)|(fr<<12));
       } else {
         fr=intr(gv(RC_INT));
