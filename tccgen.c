@@ -6402,8 +6402,8 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
 		*(float*)ptr = vtop->c.f;
 #else
                 {
-                  long *lptr = ptr;
-                  *lptr = vtop->c.f;
+		  int *iptr = ptr;
+		  *iptr = vtop->c.tab[0];
                 }
 #endif
 #endif
@@ -6414,8 +6414,9 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
 		*(double *)ptr = vtop->c.d;
 #else
                 {
-                  long long *llptr = ptr;
-                  *llptr = vtop->c.d;
+		  int *iptr = ptr;
+		  iptr[0] = vtop->c.tab[0];
+		  iptr[1] = vtop->c.tab[1];
                 }
 #endif
 #endif
