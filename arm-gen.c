@@ -1092,6 +1092,11 @@ static int copy_params(int nb_args, struct plan *plan, int todo, int *ret_stack_
                          nsaa, which MesCC miscompiles for 2+ stacked args. */
   struct param_plan *pplan;
   int pass = 0;
+  /* Rebuild the pop {todo} core-register mask inline as we walk
+     CORE_STRUCT_CLASS below, from THIS function's correct type_size rather than
+     assign_regs' pplan->end (which MesCC returns short by whole words). Start
+     from empty; the incoming out-param todo is deliberately discarded. */
+  todo = 0;
 
    /* Several constraints require parameters to be copied in a specific order:
       - structures are copied to the stack before being loaded in a reg;
@@ -1134,10 +1139,24 @@ again:
             gadd_sp(-size);
             if (i == STACK_CLASS)
               stack_size += size; /* pushed struct (incl. leading padding) */
-            else if (i == CORE_STRUCT_CLASS)
-              /* spanning struct: pop {todo} below removes the reg words; only
-                 the spill past r0-r3 stays for the callee. */
-              stack_size += size - 4 * (pplan->end - pplan->start);
+            else if (i == CORE_STRUCT_CLASS) {
+              /* Core-register words this struct spans, derived from THIS
+                 (correct) type_size -- `size` just drove the correct memcpy
+                 above -- not from assign_regs' pplan->end, which MesCC returns
+                 short by whole words (it sees size 4 for an 8-byte struct, so
+                 end lands 1 instead of 2 and pop {todo} collapses to e8bd0001).
+                 A struct fills core regs from pplan->start up to r3, then
+                 spills: nw = min(size/4, 4 - start). */
+              int nw = size >> 2;
+              if (pplan->start + nw > 4)
+                nw = 4 - pplan->start;
+              /* pop {todo}: exactly the core-reg words [start, start+nw). The
+                 closed-form mask itself compiles fine; the bug was its inputs. */
+              todo |= ((1 << (pplan->start + nw)) - 1) & ~((1 << pplan->start) - 1);
+              /* spanning struct: the pop below reclaims the reg words; only the
+                 spill past r0-r3 stays for the callee. */
+              stack_size += size - 4 * nw;
+            }
             /* generate structure store */
             r = get_reg(RC_INT);
             o(0xE28D0000|(intr(r)<<12)|padding); /* add r, sp, padding */
@@ -1240,6 +1259,14 @@ again:
   /* Manually free remaining registers since next parameters are loaded
    * manually, without the help of gv(int). */
   save_regs(nb_args);
+
+  /* The pop {todo} core-register mask was accumulated inline in the
+     CORE_STRUCT_CLASS pass above, from copy_params' own (correct) type_size.
+     We deliberately do NOT recompute it from assign_regs' *todo out-param or
+     from pplan->end here: MesCC returns a short type_size to assign_regs (4 for
+     an 8-byte struct), so both *todo and pplan->end are a whole word short and
+     pop {todo} collapses to e8bd0001. Deriving todo from the size that drove
+     the correct memcpy above is the only source that is right in context. */
 
   if(todo) {
     o(0xE8BD0000|todo); /* pop {todo} */
