@@ -84,6 +84,14 @@ enum {
 };
 
 #ifdef TCC_ARM_VFP
+/* T2CPR(t) = the VFP double-precision opcode bit. Kept as upstream's ternary,
+   but it MUST NOT be OR'd inline into an opcode word: MesCC miscompiles a
+   |-chain whose non-first term is an inline conditional (ternary, or a shift of
+   a relational), dropping the terms BEFORE it -- so `o(BASE|reg|T2CPR(t))` emits
+   the bare 0x100 and tcc-boot0 faults at the first int->double cast. The five
+   sites below compute `int cpr = T2CPR(...)` into a local first, then OR the
+   plain cpr. (Assigning the whole chain to a temp does NOT help; the fix is a
+   temp for the conditional ALONE. Same family as the gen_opi CMP if/else fix.) */
 #define T2CPR(t) (((t) & VT_BTYPE) != VT_FLOAT ? 0x100 : 0)
 #endif
 
@@ -640,7 +648,8 @@ void load(int r, SValue *sv)
         o(0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|T2CPR(ft)); /* fcpyX */
 #else
       {
-        int t = 0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|T2CPR(ft);
+        int cpr = T2CPR(ft); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+        int t = 0xEEB00A40|(vfpr(r)<<12)|vfpr(v)|cpr;
         o(t); /* fcpyX */
       }
 #endif
@@ -1771,7 +1780,8 @@ void gen_opf(int op)
 {
   uint32_t x;
   int fneg=0,r;
-  x=0xEE000A00|T2CPR(vtop->type.t);
+  { int cpr = T2CPR(vtop->type.t); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+    x=0xEE000A00|cpr; }
   switch(op) {
     case '+':
       if(is_zero(-1))
@@ -2083,7 +2093,8 @@ ST_FUNC void gen_cvt_itof1(int t)
 #if !BOOTSTRAP
     o(0xEEB80A40|r2|T2CPR(t)); /* fYitoX*/
 #else
-    int x = 0xEEB80A40|r2|T2CPR(t);
+    int cpr = T2CPR(t); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+    int x = 0xEEB80A40|r2|cpr;
     o(x); /* fYitoX*/
 #endif
 #else
@@ -2164,7 +2175,8 @@ void gen_cvt_ftoi(int t)
 #if !BOOTSTRAP
     o(0xEEBC0AC0|(r<<12)|r|T2CPR(r2)|u); /* ftoXizY */
 #else
-    int x =0xEEBC0AC0|(r<<12)|r|T2CPR(r2)|u;
+    int cpr = T2CPR(r2); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+    int x =0xEEBC0AC0|(r<<12)|r|cpr|u;
     o(x); /* ftoXizY */
 #endif
     r2=intr(vtop->r=get_reg(RC_INT));
@@ -2223,7 +2235,8 @@ void gen_cvt_ftof(int t)
 #if !BOOTSTRAP
     o(0xEEB70AC0|(r<<12)|r|T2CPR(vtop->type.t));
 #else
-    int x = 0xEEB70AC0|(r<<12)|r|T2CPR(vtop->type.t);
+    int cpr = T2CPR(vtop->type.t); /* own local: MesCC drops |-chain terms before an inline conditional; see T2CPR */
+    int x = 0xEEB70AC0|(r<<12)|r|cpr;
     o(x);
 #endif
   }
