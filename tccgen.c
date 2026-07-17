@@ -6384,8 +6384,11 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
 		*(float*)ptr = vtop->c.f;
 #else
                 {
-                  long *lptr = ptr;
-                  *lptr = vtop->c.f;
+                  /* bit copy via the union's own int view (tab[] aliases f):
+                     *lptr = vtop->c.f would store (long)c.f, truncating the
+                     VALUE instead of copying the IEEE bits. */
+                  unsigned *uptr = ptr;
+                  *uptr = vtop->c.tab[0];
                 }
 #endif
 #endif
@@ -6396,8 +6399,11 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
 		*(double *)ptr = vtop->c.d;
 #else
                 {
-                  long long *llptr = ptr;
-                  *llptr = vtop->c.d;
+                  /* bit copy via the union's own int view (tab[] aliases d):
+                     *llptr = vtop->c.d would store (long long)c.d. */
+                  unsigned *uptr = ptr;
+                  uptr[0] = vtop->c.tab[0];
+                  uptr[1] = vtop->c.tab[1];
                 }
 #endif
 #endif
