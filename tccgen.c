@@ -6415,11 +6415,14 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
 		    *(long double *)ptr = vtop->c.ld;
 #else
                 {
-                  // XXX TODO: breaks on mescc/tcc-mes based build
-                  // maybe disable with HAVE_LONG_DOUBLE?
-                  //struct long_double *ldptr = ptr;
-                  //struct long_double tmp = (struct long_double)vtop->c.ld;
-                  //*ldptr = (struct long_double)tmp;
+                  /* long double == double (8 bytes) on ARM EABI, so
+                     LDOUBLE_SIZE==8 and c.tab[] (int[LDOUBLE_SIZE/4]) holds
+                     the full IEEE representation. Bit-copy via the union's
+                     int view, as patch 0011 does for VT_DOUBLE; the old empty
+                     stub left every long double constant as 0.0. */
+                  unsigned *uptr = ptr;
+                  uptr[0] = vtop->c.tab[0];
+                  uptr[1] = vtop->c.tab[1];
                 }
 #endif
 		else if (sizeof(double) == LDOUBLE_SIZE)
